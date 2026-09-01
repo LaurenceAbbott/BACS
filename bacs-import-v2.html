@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>BACS file import — prototype</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<style>
+  html, body { margin: 0; padding: 0; background: #F5F6F8; }
+  #root { min-height: 100vh; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useRef, useCallback, useEffect } = React;
+
+/* ---------------------------------------------------------------------- */
+/* Icon assets — supplied 2x PNGs, embedded so this file is self-         */
+/* contained and works offline once downloaded.                          */
+/* ---------------------------------------------------------------------- */
+const ICON_SUCCESS = "data:image/png;base64,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";
+const ICON_ERROR = "data:image/png;base64,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";
+const ICON_UPLOAD = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACQAAAApCAYAAABdnotGAAAACXBIWXMAABYlAAAWJQFJUiTwAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAOdEVYdFNvZnR3YXJlAEZpZ21hnrGWYwAAAhVJREFUeAHtmE9SwjAUxt+rjLp04b9lPYH0BnTj4E5OIJ5APYF4AvUE4gl0J44LuEHhBiwFNyyVGX2+V1IEpKQloeOi30xnmvSl+U3avC8JwD8TgoG2SsHWxiY+8m2JAOrDD7octLwBGGhpIIFZ38AmIhSjOiJoDz/JN4FaCmgejC2o1ECLYGxApQJKAmMKlRgoDYwJlJMkKA5GOlxUlnhpJ+3BFlAcDAJdE9LdFBCXpd4EylkW5q3h1ea1kXoTKMcmjA0oxzaMKdRcoPVNuDWB0UEpu0kOhICnpjCLoFglSAPEatmAiYMSI4Y0QL1G0ecpXOGX+KYwM1C+XP1G8SwurhD3oP/sPYFlMVRLF5MoU2epHEinHEinHEinHEinwt5xcMGOdcUGM/j+osr7q9eGjLRfDlwCbIYForvei3fr8LrznGFkfeKiA7UU74O1CROeV9aJYe6lX7lIBgVGn8yNAnitkngxLmJv6rJZHhA7uTLiLiypqO8CGEpB1MCS8lmmUw6kk8OL5vG+mwgPIVu5MO57xMF56Hc/LlNv9yg4gQy0Uw6qMJVyqBMCcf54mIpEvFfBK9N2OSg5iDdT3aqdSHgcs3fcDnikZo9ZuuqyLRcmRibqi3c6B3ITJkYkqihPcTUNVyHJ9n5UCGeZsgCp7EKGkvOkWcv5c4LGDlzlnWWV/6VDZbp2JbOaqCP/DIPUZx//AOPNC+PSFJMbAAAAAElFTkSuQmCC";
+const ICON_TRASH = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFAAAABQCAYAAACOEfKtAAAACXBIWXMAABYlAAAWJQFJUiTwAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAOdEVYdFNvZnR3YXJlAEZpZ21hnrGWYwAAAgFJREFUeAHt2kFu00AYhuHPjhddoNg3wDcAlogiTU9Ae4NwArhBywnoDWhPgqG03YYT1EewYIMQ9fC7KYiKRiQdGA/t+2w8mrEm0RdNbP9jCQAAAAAAAAAAAABwm2VKyD135DL5eslwN9H5vGu2WiUkmQAr937mNXnzh9PaTF8fWYidEpErERbe7gqn1VLxUAlJIsDKHQ+h1Kuc65WtEnQ0UZfw1J3uZupnv4/4yr5KpdW11/R1trx3Yv9HForIwttbNrKm+rrOXsXMDnuKKHKAeuUlp3/Ay3e5igMBd0r0+8DhittLL4Z2rv6wa542uqGpO9q3WUpbwB8/NZv7GkHU/8DBN/XVRPlsaJ/Lv1OATNm2He5rMc8oASZzI/2/SirA0n14W7rjs8sb65+m7uS19Xt73NtWYpIJsHKntS1KZ826V38lKCswvByOvSbPlBiWcCACDESAgQgwEAEGIsBABBiIAAMRYKCEAvxiO21ZO7S88vbq2KI/t6qLEhO9GrPMsFVpj3Nbw/7I5+bJ/Ncxq7pc9HfN5lyJSSbAQdc8btfpT0H0AAvlnb9sZ8ofbFwUEda3YXVFm6fUyEZ5M6F0J2da/grH2qzC/dyW/YFGMMpFxMpTOz8uDH9hrsOxwlt8/kgW9b/eWe2v1g3Zr9+E7KkAAAAAAAAAAAAAAACk7Tt3OYFgyDp9JgAAAABJRU5ErkJggg==";
+const ICON_CHEVRON_DOWN = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADgAAAA4CAYAAACohjseAAAACXBIWXMAABYlAAAWJQFJUiTwAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAOdEVYdFNvZnR3YXJlAEZpZ21hnrGWYwAAAMlJREFUeAHt0i0OwkAQhuFZcKQSU8MhuA1YzoXBYOEOcBFEa8A12LIjSDCEn/2mCN4nmWTXTPImYwYAAAAAAAAA/yWZSF3X85TSKj8nVuacZ9c0zdEERiaS4xZWHuemeZYmIgs0Tdzd1URkgX3fb00k79qbyNhEuq47VVV1yac6twI5bt227cFEZIGuNFId56SB7tvIiDgnD3SfRkbFuZBA925kZJwLC3SvIqPjXGigexY5RJwLD3QPkTP/57jNEHEAAAAAAAD4jRsT22/vlFPMLQAAAABJRU5ErkJggg==";
+
+/* ---------------------------------------------------------------------- */
+/* Design tokens — pixel-sampled directly from the reference screenshots  */
+/* ---------------------------------------------------------------------- */
+const C = {
+  text: "#1A1A1A",
+  textSecondary: "#282828",
+  textLabel: "#454545",
+  muted: "#6B6B6B",
+  border: "#DADADA",
+  card: "#FFFFFF",
+  page: "#FFFFFF",
+  blue: "#0F40C5",
+  blueDisabled: "#6383D9",
+  blueDropdownHighlight: "#1967D2",
+  link: "#0F40C5",
+  redBg: "#FCE7E7",
+  red: "#D7050C",
+};
+
+const font = "'Proxima Soft', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+
+const WORKFLOWS = {
+  ARUDD: {
+    key: "ARUDD",
+    label: "ARUDD file",
+    desc: "Returned or unpaid direct debit collections against existing policies.",
+  },
+  COMBINED: {
+    key: "COMBINED",
+    label: "AUDDIS Return / ADDACS file",
+    desc: "A single file that mixes AUDDIS returns and ADDACS records — each row is typed individually, not the file as a whole.",
+  },
+};
+
+function ErrorMessage({ workflowLabel }) {
+  return (
+    <>This file doesn't match the {workflowLabel ? workflowLabel.replace(" file", "") : "selected"} format. Check you've selected the correct file type and try again.</>
+  );
+}
+
+/* Small inline icon replacements (no external icon library needed) */
+function RotateCcwIcon({ size = 14 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="1 4 1 10 7 10" />
+      <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+    </svg>
+  );
+}
+function Loader2Icon({ size = 15, style = {} }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={style}>
+      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+    </svg>
+  );
+}
+
+/* ---------------------------------------------------------------------- */
+/* Custom dropdown                                                        */
+/* ---------------------------------------------------------------------- */
+function FileTypeSelect({ value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    function onDocClick(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, []);
+
+  const options = [
+    { key: "", label: "Select" },
+    { key: "ARUDD", label: "ARUDD file" },
+    { key: "COMBINED", label: "AUDDIS Return / ADDACS file" },
+  ];
+
+  const current = options.find(o => o.key === value) || options[0];
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        style={{
+          width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "10px 12px", borderRadius: 8, border: `1px solid ${C.border}`,
+          background: C.card, fontSize: 14, color: value ? C.text : "#8A909B",
+          cursor: "pointer", fontFamily: font,
+        }}
+      >
+        {current.label}
+        <img src={ICON_CHEVRON_DOWN} alt="" style={{ width: 28, height: 28 }} />
+      </button>
+
+      {open && (
+        <div style={{
+          position: "absolute", top: "calc(100% + 2px)", left: 0, right: 0, zIndex: 20,
+          background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
+          boxShadow: "0 6px 16px rgba(15,18,25,0.12)", overflow: "hidden",
+        }}>
+          {options.map(o => {
+            const isSelected = o.key === value;
+            return (
+              <div
+                key={o.key || "placeholder"}
+                onClick={() => { onChange(o.key); setOpen(false); }}
+                style={{
+                  padding: "10px 12px", fontSize: 14, cursor: "pointer",
+                  background: isSelected ? C.blueDropdownHighlight : C.card,
+                  color: isSelected ? "#FFFFFF" : C.text,
+                }}
+              >
+                {o.label}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------- */
+/* Main component                                                         */
+/* ---------------------------------------------------------------------- */
+function BacsImportV2() {
+  const [stage, setStage] = useState("upload"); // upload | results | error
+  const [workflowKey, setWorkflowKey] = useState("");
+  const [pendingFile, setPendingFile] = useState(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [fileName, setFileName] = useState(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const inputRef = useRef(null);
+
+  const workflow = workflowKey ? WORKFLOWS[workflowKey] : null;
+
+  const runImport = useCallback(() => {
+    if (!workflowKey || !pendingFile) return;
+    const name = pendingFile.name;
+    setFileName(name);
+    setIsImporting(true);
+    setTimeout(() => {
+      const forceError = /error|fail/i.test(name);
+      setIsImporting(false);
+      setStage(forceError ? "error" : "results");
+    }, 2500);
+  }, [workflowKey, pendingFile]);
+
+  const resetToUpload = () => {
+    setStage("upload"); setPendingFile(null); setFileName(null);
+  };
+
+  const page = {
+    maxWidth: 364, margin: "0 auto", fontFamily: font, color: C.text,
+  };
+  const card = {
+    background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, padding: 32,
+  };
+
+  return (
+    <div style={{ background: "#F5F6F8", minHeight: 500, padding: "40px 20px" }}>
+      <div style={page}>
+        <div style={card}>
+          <h1 style={{ fontSize: 22, fontWeight: 700, margin: "0 0 6px", letterSpacing: -0.2 }}>Import files</h1>
+
+          {stage === "upload" && (
+            <>
+              <p style={{ fontSize: 14, color: C.textSecondary, margin: "0 0 24px", lineHeight: 1.45 }}>
+                Choose the type of file you've received from BACS.
+              </p>
+
+              <label style={{ fontSize: 13.5, fontWeight: 600, color: C.textLabel, marginBottom: 8, display: "block" }}>BACS file type</label>
+              <FileTypeSelect value={workflowKey} onChange={(k) => { setWorkflowKey(k); setPendingFile(null); }} />
+
+              {workflow && (
+                <>
+                  <div style={{ fontSize: 12.5, color: C.muted, marginTop: 8, lineHeight: 1.45 }}>{workflow.desc}</div>
+
+                  <div
+                    onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                    onDragLeave={() => setDragOver(false)}
+                    onDrop={(e) => { e.preventDefault(); setDragOver(false); setPendingFile(e.dataTransfer.files && e.dataTransfer.files[0] ? e.dataTransfer.files[0] : null); }}
+                    onClick={() => inputRef.current && inputRef.current.click()}
+                    style={{
+                      marginTop: 16,
+                      border: pendingFile ? `1px solid ${C.border}` : `1.5px dashed ${dragOver ? C.blue : "#B9C0CC"}`,
+                      borderRadius: 10, padding: pendingFile ? "16px 16px" : "30px 16px",
+                      textAlign: pendingFile ? "left" : "center",
+                      cursor: "pointer", background: dragOver ? "#EEF1FE" : (pendingFile ? "#FAFBFC" : C.card),
+                      transition: "all .15s ease",
+                    }}
+                  >
+                    <input ref={inputRef} type="file" style={{ display: "none" }}
+                      onChange={(e) => setPendingFile(e.target.files && e.target.files[0] ? e.target.files[0] : null)} />
+                    {pendingFile ? (
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                        <div style={{ fontSize: 14, fontWeight: 600 }}>{pendingFile.name}</div>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setPendingFile(null); }}
+                          aria-label="Remove file"
+                          style={{
+                            background: "none", border: "none", cursor: "pointer", padding: 4,
+                            display: "flex", alignItems: "center",
+                          }}
+                        ><img src={ICON_TRASH} alt="" style={{ width: 40, height: 40 }} /></button>
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+                        <img src={ICON_UPLOAD} alt="" style={{ width: 18, height: 20.5 }} />
+                        <div style={{ fontSize: 14, fontWeight: 600, color: C.blue }}>Drop files here</div>
+                        <div style={{ fontSize: 12.5, color: C.muted }}>or click to browse</div>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+
+              <button
+                onClick={runImport}
+                disabled={!workflowKey || !pendingFile || isImporting}
+                style={{
+                  width: "100%", marginTop: 18, padding: "12px 0", borderRadius: 8, border: "none",
+                  background: (!workflowKey || !pendingFile) ? C.blueDisabled : C.blue,
+                  color: "#fff", fontSize: 14.5, fontWeight: 600, fontFamily: font,
+                  cursor: (!workflowKey || !pendingFile || isImporting) ? "default" : "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                }}
+              >
+                {isImporting && <Loader2Icon size={15} style={{ animation: "spin 0.8s linear infinite" }} />}
+                {isImporting ? "Importing…" : "Import"}
+              </button>
+              <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+            </>
+          )}
+
+          {stage === "results" && (
+            <div style={{ marginTop: 4 }}>
+              <img src={ICON_SUCCESS} alt="" style={{ width: 48, height: 48, marginBottom: 16, display: "block" }} />
+              <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 14 }}>File successfully uploaded</div>
+              <div style={{ fontSize: 12.5, color: C.muted, marginBottom: 3 }}>{workflow && workflow.label}</div>
+              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 18 }}>{fileName}</div>
+              <div style={{ display: "flex", gap: 20 }}>
+                <button onClick={resetToUpload} style={{
+                  background: "none", border: "none", color: C.link, fontSize: 13.5, fontWeight: 600, cursor: "pointer", padding: 0, fontFamily: font,
+                }}>Import another file</button>
+                <span
+                  title="Links to the Reports tab in the live system — not part of this prototype"
+                  style={{ color: C.link, fontSize: 13.5, fontWeight: 600, cursor: "default" }}
+                >View BACS record</span>
+              </div>
+            </div>
+          )}
+
+          {stage === "error" && (
+            <div style={{ marginTop: 4 }}>
+              <img src={ICON_ERROR} alt="" style={{ width: 48, height: 48, marginBottom: 16, display: "block" }} />
+              <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>File failed to upload</div>
+              <p style={{ fontSize: 13.5, color: C.text, lineHeight: 1.5, margin: "0 0 18px", maxWidth: 320 }}>
+                <ErrorMessage workflowLabel={workflow && workflow.label} />
+              </p>
+              <div style={{ fontSize: 12.5, color: C.muted, marginBottom: 3 }}>{workflow && workflow.label}</div>
+              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 20 }}>{fileName}</div>
+              <button onClick={resetToUpload} style={{
+                width: "100%", padding: "12px 0", borderRadius: 8, border: "none", background: C.blue,
+                color: "#fff", fontSize: 14.5, fontWeight: 600, fontFamily: font, cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+              }}><RotateCcwIcon size={14} /> Try again</button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<BacsImportV2 />);
+</script>
+</body>
+</html>
