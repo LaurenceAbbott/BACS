@@ -79,7 +79,7 @@ const FILE_TYPES = {
   },
 };
 
-const STATUSES = ["In progress", "Completed", "Failed"];
+const STATUSES = ["In-progress", "Completed", "Failed"];
 
 const SEED_ROWS = [
   { id: 1, filename: "AUDDISFileA0000215", type: "COMBINED", status: "Completed", date: "02/09/2026" },
@@ -122,7 +122,7 @@ function Spinner({ size = 13 }) {
 function StatusBadge({ status, failMessage }) {
   const [hover, setHover] = useState(false);
   const map = {
-    "In progress": { fg: C.blueText, bg: C.blueBg, bd: C.blueBorder, glyph: "i" },
+    "In-progress": { fg: C.blueText, bg: C.blueBg, bd: C.blueBorder, glyph: "i" },
     "Completed": { fg: C.greenText, bg: C.greenBg, bd: C.greenBorder, glyph: "✓" },
     "Failed": { fg: C.redText, bg: C.redBg, bd: C.redBorder, glyph: "!" },
   };
@@ -481,7 +481,7 @@ function BacsImportTab() {
     const id = nextId.current++;
     const willFail = /error|fail/i.test(filename);
     setRows(prev => [
-      { id, filename, type, status: "In progress", date: "02/09/2026", isNew: true },
+      { id, filename, type, status: "In-progress", date: "02/09/2026", isNew: true },
       ...prev,
     ]);
     setToast("File submitted for import");
