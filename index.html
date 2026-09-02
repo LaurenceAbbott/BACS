@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>BACS File Import &mdash; prototype</title>
+<meta name="description" content="Low-fidelity interactive prototype of the BACS file import flow. For illustration purposes only." />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js" crossorigin></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js" crossorigin></script>
+<style>
+  html, body { margin: 0; padding: 0; background: #fff; }
+  * { box-sizing: border-box; }
+  #root { min-height: 100vh; }
+  .prototype-note {
+    font: 12px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    color: #6B6B6B; padding: 10px 18px; border-top: 1px solid #DDE0E5; background: #FAFBFC;
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div class="prototype-note">
+  Low-fidelity prototype for illustration purposes only. Interactive: file type selection, file upload,
+  import (toast then table row), status filters, row actions, view modal. Include &ldquo;error&rdquo; or
+  &ldquo;fail&rdquo; in a filename to see the failed state.
+</div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useRef, useCallback, useEffect } = React;
+
+
+/* ------------------------------------------------------------------ */
+/* Low-fidelity tokens. High-fidelity treatment lives in Figma —      */
+/* this build is for demonstrating flow and behaviour only.           */
+/* ------------------------------------------------------------------ */
+const C = {
+  sidebar: "#1B3FCC",
+  page: "#FFFFFF",
+  card: "#FFFFFF",
+  border: "#DDE0E5",
+  borderInput: "#C8CCD4",
+  headerRow: "#F4F5F7",
+  text: "#1A1A1A",
+  muted: "#6B6B6B",
+  faint: "#8A8F98",
+  blue: "#0F40C5",
+  blueDisabled: "#6383D9",
+  link: "#0F40C5",
+  greenText: "#1E7B45",
+  greenBg: "#E4F4E9",
+  greenBorder: "#9FD5B2",
+  redText: "#C0212B",
+  redBg: "#FBE6E7",
+  redBorder: "#EBA9AE",
+  blueText: "#1B4FC4",
+  blueBg: "#E6ECFB",
+  blueBorder: "#A7BCEE",
+  toastBg: "#E4F4E4",
+  toastBar: "#1E7B32",
+  toastText: "#1B5E24",
+};
+
+const font = "'Proxima Soft', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+
+const TABS = ["Process", "Import", "Originators", "Calendar"];
+
+const FILE_TYPES = {
+  ARUDD: {
+    key: "ARUDD",
+    label: "ARUDD file",
+    desc: "Returned or unpaid direct debit collections against existing policies.",
+  },
+  COMBINED: {
+    key: "COMBINED",
+    label: "AUDDIS Return / ADDACS file",
+    desc: "A single file containing both AUDDIS return and ADDACS records.",
+  },
+};
+
+const STATUSES = ["In progress", "Completed", "Failed"];
+
+const SEED_ROWS = [
+  { id: 1, filename: "AUDDISFileA0000215", type: "COMBINED", status: "Completed", date: "02/09/2026" },
+  { id: 2, filename: "ARUDD0902-KP.RFT", type: "ARUDD", status: "Completed", date: "02/09/2026" },
+  { id: 3, filename: "AUDDISFileA0000214", type: "COMBINED", status: "Completed", date: "01/09/2026" },
+  { id: 4, filename: "ARUDDAugust202601.txt", type: "ARUDD", status: "Completed", date: "29/08/2026" },
+  { id: 5, filename: "ARUDD_0829.RFT", type: "ARUDD", status: "Completed", date: "28/08/2026" },
+  { id: 6, filename: "AUDDISStaticExportFile", type: "COMBINED", status: "Completed", date: "27/08/2026" },
+  { id: 7, filename: "ARUDD0827-RP.RFT", type: "ARUDD", status: "Completed", date: "26/08/2026" },
+  { id: 8, filename: "AUDDISFileA0000213", type: "COMBINED", status: "Completed", date: "26/08/2026" },
+  { id: 9, filename: "ARUDD_25082026.txt", type: "ARUDD", status: "Completed", date: "24/08/2026" },
+  { id: 10, filename: "ADDACSCJones", type: "COMBINED", status: "Completed", date: "22/08/2026" },
+];
+
+const FAIL_MESSAGE = {
+  title: "The file import failed",
+  body: "The file could not be processed. Check the file matches the selected BACS file type and try importing it again.",
+};
+
+/* ------------------------------------------------------------------ */
+/* Bits and pieces                                                     */
+/* ------------------------------------------------------------------ */
+function Chevron({ size = 10, color = C.faint }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 10 6" fill="none" style={{ flexShrink: 0 }}>
+      <path d="M1 1l4 4 4-4" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function Spinner({ size = 13 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="2.6" strokeLinecap="round" style={{ animation: "bacsspin .8s linear infinite" }}>
+      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+    </svg>
+  );
+}
+
+function StatusBadge({ status, failMessage }) {
+  const [hover, setHover] = useState(false);
+  const map = {
+    "In progress": { fg: C.blueText, bg: C.blueBg, bd: C.blueBorder, glyph: "i" },
+    "Completed": { fg: C.greenText, bg: C.greenBg, bd: C.greenBorder, glyph: "✓" },
+    "Failed": { fg: C.redText, bg: C.redBg, bd: C.redBorder, glyph: "!" },
+  };
+  const s = map[status];
+  const isFailed = status === "Failed";
+
+  return (
+    <span style={{ position: "relative", display: "inline-block" }}>
+      <span
+        onMouseEnter={() => isFailed && setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        style={{
+          display: "inline-flex", alignItems: "center", gap: 5,
+          background: s.bg, color: s.fg, border: `1px solid ${s.bd}`,
+          fontSize: 12, fontWeight: 600, padding: "3px 9px", borderRadius: 999,
+          cursor: isFailed ? "help" : "default", whiteSpace: "nowrap",
+        }}
+      >
+        <span style={{
+          width: 13, height: 13, borderRadius: "50%", background: s.fg, color: s.bg,
+          fontSize: 9, fontWeight: 700, display: "inline-flex", alignItems: "center",
+          justifyContent: "center", flexShrink: 0,
+        }}>{s.glyph}</span>
+        {status}
+      </span>
+
+      {hover && isFailed && (
+        <span style={{
+          position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 40,
+          width: 250, background: "#F1F2F4", border: `1px solid ${C.border}`,
+          borderRadius: 6, padding: "10px 12px", textAlign: "left",
+          boxShadow: "0 4px 14px rgba(0,0,0,.12)", display: "block",
+        }}>
+          <span style={{ display: "block", fontSize: 12.5, fontWeight: 700, marginBottom: 4, color: C.text }}>
+            {failMessage.title}
+          </span>
+          <span style={{ display: "block", fontSize: 12, color: C.muted, lineHeight: 1.45 }}>
+            {failMessage.body}
+          </span>
+        </span>
+      )}
+    </span>
+  );
+}
+
+/* A select that actually opens, used for the filters and the file type picker */
+function Select({ value, onChange, options, placeholder = "Select", width, disabled }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    function onDoc(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+
+  const current = options.find(o => o.key === value);
+
+  return (
+    <div ref={ref} style={{ position: "relative", width: width || "100%" }}>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen(o => !o)}
+        style={{
+          width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+          gap: 8, padding: "8px 11px", borderRadius: 6, fontFamily: font,
+          border: `1px solid ${open ? C.blue : C.borderInput}`, background: C.card,
+          fontSize: 13, color: current ? C.text : C.faint,
+          cursor: disabled ? "not-allowed" : "pointer", textAlign: "left",
+        }}
+      >
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {current ? current.label : placeholder}
+        </span>
+        <Chevron />
+      </button>
+
+      {open && (
+        <div style={{
+          position: "absolute", top: "calc(100% + 3px)", left: 0, right: 0, zIndex: 50,
+          background: C.card, border: `1px solid ${C.border}`, borderRadius: 6,
+          boxShadow: "0 6px 18px rgba(0,0,0,.14)", overflow: "hidden", minWidth: 170,
+        }}>
+          <div
+            onClick={() => { onChange(""); setOpen(false); }}
+            style={{
+              padding: "8px 11px", fontSize: 13, cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              color: C.blue, fontWeight: value === "" ? 600 : 400,
+              background: value === "" ? "#F3F6FD" : C.card,
+            }}
+          >
+            {placeholder} {value === "" && <span style={{ fontSize: 12 }}>✓</span>}
+          </div>
+          {options.map(o => (
+            <div
+              key={o.key}
+              onClick={() => { onChange(o.key); setOpen(false); }}
+              style={{
+                padding: "8px 11px", fontSize: 13, cursor: "pointer", color: C.text,
+                background: o.key === value ? "#F3F6FD" : C.card,
+                fontWeight: o.key === value ? 600 : 400,
+              }}
+            >
+              {o.label}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Row ••• menu */
+function RowMenu({ onView, onExport }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    function onDoc(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+
+  return (
+    <div ref={ref} style={{ position: "relative", display: "flex", justifyContent: "flex-end" }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        aria-label="Row actions"
+        style={{
+          background: open ? C.blue : "none", border: "none", cursor: "pointer",
+          color: open ? "#fff" : C.blue, fontSize: 15, lineHeight: 1, letterSpacing: 1,
+          padding: "3px 6px", borderRadius: 4, fontWeight: 700,
+        }}
+      >···</button>
+
+      {open && (
+        <div style={{
+          position: "absolute", top: "calc(100% + 4px)", right: 0, zIndex: 60,
+          background: C.card, border: `1px solid ${C.border}`, borderRadius: 6,
+          boxShadow: "0 6px 18px rgba(0,0,0,.14)", overflow: "hidden", width: 118,
+        }}>
+          {[
+            { label: "View", fn: onView },
+            { label: "Export", fn: onExport },
+          ].map(item => (
+            <div
+              key={item.label}
+              onClick={() => { setOpen(false); item.fn(); }}
+              style={{
+                padding: "8px 11px", fontSize: 13, cursor: "pointer", color: C.text,
+                display: "flex", alignItems: "center", gap: 7,
+              }}
+            >
+              <span style={{ color: C.muted, fontSize: 11 }}>{item.label === "View" ? "◉" : "⤓"}</span>
+              {item.label}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Import files card                                                   */
+/* ------------------------------------------------------------------ */
+function ImportFilesCard({ onImported }) {
+  const [typeKey, setTypeKey] = useState("");
+  const [file, setFile] = useState(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const inputRef = useRef(null);
+
+  const type = typeKey ? FILE_TYPES[typeKey] : null;
+
+  const submit = useCallback(() => {
+    if (!typeKey || !file || importing) return;
+    setImporting(true);
+    setTimeout(() => {
+      onImported({ filename: file.name, type: typeKey });
+      setImporting(false);
+      setTypeKey("");
+      setFile(null);
+    }, 900);
+  }, [typeKey, file, importing, onImported]);
+
+  const canSubmit = typeKey && file && !importing;
+
+  return (
+    <div style={{
+      background: C.card, border: `1px solid ${C.border}`, borderRadius: 10,
+      padding: 22, width: 300, flexShrink: 0,
+    }}>
+      <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 5 }}>Import files</div>
+      <div style={{ fontSize: 12.5, color: C.muted, lineHeight: 1.45, marginBottom: 18 }}>
+        Choose the type of file you've received from BACS.
+      </div>
+
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>BACS file type</div>
+      <Select
+        value={typeKey}
+        onChange={(k) => { setTypeKey(k); setFile(null); }}
+        options={Object.values(FILE_TYPES).map(t => ({ key: t.key, label: t.label }))}
+      />
+
+      {type && (
+        <>
+          <div style={{ fontSize: 11.5, color: C.muted, marginTop: 7, lineHeight: 1.4 }}>
+            {type.desc}
+          </div>
+
+          <div
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault(); setDragOver(false);
+              if (e.dataTransfer.files && e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]);
+            }}
+            onClick={() => inputRef.current && inputRef.current.click()}
+            style={{
+              marginTop: 14, borderRadius: 8, cursor: "pointer",
+              border: file ? `1px solid ${C.border}` : `1.5px dashed ${dragOver ? C.blue : C.borderInput}`,
+              background: dragOver ? "#EEF2FD" : (file ? "#FAFBFC" : C.card),
+              padding: file ? "13px 13px" : "24px 14px",
+              textAlign: file ? "left" : "center",
+            }}
+          >
+            <input ref={inputRef} type="file" style={{ display: "none" }}
+              onChange={(e) => e.target.files && e.target.files[0] && setFile(e.target.files[0])} />
+
+            {file ? (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                <span style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {file.name}
+                </span>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setFile(null); }}
+                  aria-label="Remove file"
+                  style={{ background: "none", border: "none", cursor: "pointer", color: C.blue, fontSize: 14, padding: 2 }}
+                >🗑</button>
+              </div>
+            ) : (
+              <>
+                <div style={{ fontSize: 17, color: C.blue, marginBottom: 3 }}>⤒</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: C.blue }}>Drop files here</div>
+                <div style={{ fontSize: 11.5, color: C.muted, marginTop: 2 }}>or click to browse</div>
+              </>
+            )}
+          </div>
+        </>
+      )}
+
+      <button
+        onClick={submit}
+        disabled={!canSubmit}
+        style={{
+          width: "100%", marginTop: 16, padding: "10px 0", borderRadius: 6, border: "none",
+          background: canSubmit ? C.blue : C.blueDisabled, color: "#fff",
+          fontSize: 13.5, fontWeight: 600, fontFamily: font,
+          cursor: canSubmit ? "pointer" : "default",
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
+        }}
+      >
+        {importing && <Spinner />}
+        {importing ? "Importing…" : "Import"}
+      </button>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* View modal                                                          */
+/* ------------------------------------------------------------------ */
+function ViewModal({ row, onClose }) {
+  if (!row) return null;
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, background: "rgba(20,22,28,.45)", zIndex: 200,
+        display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: C.card, borderRadius: 10, width: "min(520px, 100%)",
+          boxShadow: "0 20px 50px rgba(0,0,0,.25)", overflow: "hidden",
+        }}
+      >
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "15px 18px",
+        }}>
+          <span style={{ fontSize: 13, color: C.text }}>{row.filename}</span>
+          <button onClick={onClose} aria-label="Close" style={{
+            background: "none", border: "none", cursor: "pointer",
+            fontSize: 17, color: C.muted, lineHeight: 1, padding: 2,
+          }}>×</button>
+        </div>
+
+        <div style={{ padding: "0 18px" }}>
+          <div style={{
+            border: `1px dashed ${C.borderInput}`, padding: 5, borderRadius: 4,
+          }}>
+            <div style={{
+              background: "#2F49D4", height: 210, borderRadius: 2,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              color: "rgba(255,255,255,.85)", fontSize: 12, textAlign: "center", padding: 20,
+              lineHeight: 1.5,
+            }}>
+              Transformed report output<br />
+              <span style={{ fontSize: 11, color: "rgba(255,255,255,.65)" }}>
+                Placeholder — format to be confirmed
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "flex-end",
+          gap: 16, padding: "16px 18px",
+        }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: C.link, cursor: "pointer" }}>
+            Reason codes
+          </span>
+          <button style={{
+            background: C.blue, border: "none", color: "#fff", borderRadius: 6,
+            padding: "8px 15px", fontSize: 13, fontWeight: 600, cursor: "pointer",
+            fontFamily: font, display: "flex", alignItems: "center", gap: 7,
+          }}>
+            <span style={{ fontSize: 11 }}>⤓</span> Export
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Page                                                                */
+/* ------------------------------------------------------------------ */
+function BacsImportTab() {
+  const [rows, setRows] = useState(SEED_ROWS);
+  const [filterStatus, setFilterStatus] = useState("");
+  const [filterType, setFilterType] = useState("");
+  const [viewRow, setViewRow] = useState(null);
+  const [toast, setToast] = useState(null);
+  const nextId = useRef(100);
+
+  /* New import lands as a row, then settles to Completed to show the
+     queued/background processing behaviour. */
+  const handleImported = useCallback(({ filename, type }) => {
+    const id = nextId.current++;
+    const willFail = /error|fail/i.test(filename);
+    setRows(prev => [
+      { id, filename, type, status: "In progress", date: "02/09/2026", isNew: true },
+      ...prev,
+    ]);
+    setToast("File submitted for import");
+    setTimeout(() => setToast(null), 4000);
+    setTimeout(() => {
+      setRows(prev => prev.map(r =>
+        r.id === id ? { ...r, status: willFail ? "Failed" : "Completed" } : r
+      ));
+    }, 6000);
+  }, []);
+
+  const visible = rows.filter(r =>
+    (!filterStatus || r.status === filterStatus) &&
+    (!filterType || r.type === filterType)
+  );
+
+  const th = {
+    textAlign: "left", padding: "9px 14px", fontSize: 12, fontWeight: 600,
+    color: C.muted, whiteSpace: "nowrap",
+  };
+  const td = { padding: "11px 14px", fontSize: 13, color: C.text, verticalAlign: "middle" };
+
+  return (
+    <div style={{ fontFamily: font, color: C.text, background: C.page, minHeight: 720, display: "flex", flexDirection: "column" }}>
+      <style>{`@keyframes bacsspin { to { transform: rotate(360deg); } }
+        @keyframes bacstoast { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }`}</style>
+
+      {/* Top bar */}
+      <div style={{
+        height: 52, borderBottom: `1px solid ${C.border}`, display: "flex",
+        alignItems: "center", justifyContent: "space-between", padding: "0 18px", flexShrink: 0,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+          <span style={{ fontSize: 17, fontWeight: 800, color: C.blue, letterSpacing: -0.4 }}>open gi</span>
+          <span style={{
+            border: `1px solid ${C.border}`, borderRadius: 6, padding: "5px 10px",
+            width: 175, color: C.faint, fontSize: 12.5,
+          }}>Search for a client</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 16, fontSize: 12.5, color: C.muted }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <span style={{ width: 7, height: 7, borderRadius: "50%", background: C.greenText, display: "inline-block" }} />
+            Live
+          </span>
+          <span style={{ textAlign: "right", lineHeight: 1.25 }}>
+            13:24<br /><span style={{ fontSize: 11 }}>07 August 2023</span>
+          </span>
+          <span style={{ color: C.blue, fontWeight: 600, display: "flex", alignItems: "center", gap: 4 }}>
+            Accounts <Chevron color={C.blue} />
+          </span>
+          <span style={{
+            width: 27, height: 27, borderRadius: "50%", background: "#5B2E8C", color: "#fff",
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+            fontSize: 11, fontWeight: 700,
+          }}>AC</span>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
+        {/* Sidebar */}
+        <div style={{
+          width: 150, background: C.sidebar, flexShrink: 0, color: "#fff",
+          display: "flex", flexDirection: "column", justifyContent: "space-between", padding: "16px 0",
+        }}>
+          <div style={{ padding: "0 16px", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ opacity: .85 }}>▤</span> BACS
+          </div>
+          <div style={{ padding: "0 16px", fontSize: 12, opacity: .8, display: "flex", alignItems: "center", gap: 6 }}>
+            ◀ Collapse menu
+          </div>
+        </div>
+
+        {/* Main */}
+        <div style={{ flex: 1, padding: "20px 24px", minWidth: 0, overflowX: "auto" }}>
+          {/* Tabs */}
+          <div style={{ display: "flex", gap: 24, borderBottom: `1px solid ${C.border}`, marginBottom: 20 }}>
+            {TABS.map(t => {
+              const active = t === "Import";
+              return (
+                <div key={t} style={{
+                  paddingBottom: 9, fontSize: 13.5, fontWeight: active ? 700 : 500,
+                  color: active ? C.blue : C.muted,
+                  borderBottom: active ? `2px solid ${C.blue}` : "2px solid transparent",
+                  cursor: "default",
+                }}>{t}</div>
+              );
+            })}
+          </div>
+
+          <div style={{ display: "flex", gap: 24, alignItems: "flex-start", flexWrap: "wrap" }}>
+            <ImportFilesCard onImported={handleImported} />
+
+            {/* Previous imports */}
+            <div style={{ flex: 1, minWidth: 520 }}>
+              <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 14 }}>Previous imports</div>
+
+              <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 14 }}>
+                <div>
+                  <div style={{ fontSize: 12, color: C.muted, marginBottom: 5 }}>Import date range</div>
+                  <div style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
+                    padding: "8px 11px", borderRadius: 6, border: `1px solid ${C.borderInput}`,
+                    fontSize: 12.5, color: C.faint, width: 218, cursor: "not-allowed",
+                    whiteSpace: "nowrap",
+                  }}>
+                    dd/mm/yyyy-dd/mm/yyyy <span style={{ fontSize: 12 }}>▦</span>
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, color: C.muted, marginBottom: 5 }}>Import status</div>
+                  <Select
+                    value={filterStatus}
+                    onChange={setFilterStatus}
+                    options={STATUSES.map(s => ({ key: s, label: s }))}
+                    width={158}
+                  />
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, color: C.muted, marginBottom: 5 }}>BACS file type</div>
+                  <Select
+                    value={filterType}
+                    onChange={setFilterType}
+                    options={Object.values(FILE_TYPES).map(t => ({ key: t.key, label: t.label }))}
+                    width={200}
+                  />
+                </div>
+              </div>
+
+              <div style={{ fontSize: 12.5, color: C.muted, marginBottom: 10 }}>
+                Search results found{" "}
+                <strong style={{ color: C.text }}>
+                  1-{visible.length} of {visible.length}
+                </strong>
+              </div>
+
+              <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, overflow: "visible" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ background: C.headerRow, borderBottom: `1px solid ${C.border}` }}>
+                      <th style={th}>Filename ⇅</th>
+                      <th style={th}>Import status ⇅</th>
+                      <th style={th}>Import date ⇅</th>
+                      <th style={th}>BACS file type ⇅</th>
+                      <th style={{ ...th, width: 46 }} />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visible.length === 0 && (
+                      <tr>
+                        <td colSpan={5} style={{ ...td, textAlign: "center", color: C.muted, padding: "26px 14px" }}>
+                          No imports match the selected filters.
+                        </td>
+                      </tr>
+                    )}
+                    {visible.map((r, i) => (
+                      <tr key={r.id} style={{
+                        borderBottom: i === visible.length - 1 ? "none" : `1px solid #EFF0F2`,
+                        background: r.isNew ? "#FBFCFE" : "transparent",
+                      }}>
+                        <td style={td}>{r.filename}</td>
+                        <td style={td}><StatusBadge status={r.status} failMessage={FAIL_MESSAGE} /></td>
+                        <td style={{ ...td, color: C.muted }}>{r.date}</td>
+                        <td style={{ ...td, color: C.muted }}>{FILE_TYPES[r.type].label}</td>
+                        <td style={{ ...td, paddingRight: 10 }}>
+                          <RowMenu
+                            onView={() => setViewRow(r)}
+                            onExport={() => {
+                              setToast(`Exporting ${r.filename}`);
+                              setTimeout(() => setToast(null), 3000);
+                            }}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div style={{ display: "flex", gap: 5, marginTop: 14 }}>
+                {["«", "‹", "1", "2", "3", "4", "›", "»"].map((p, i) => (
+                  <div key={i} style={{
+                    minWidth: 25, height: 25, borderRadius: 4, fontSize: 12,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    border: `1px solid ${C.border}`, cursor: "default",
+                    background: p === "1" ? C.blue : C.card,
+                    color: p === "1" ? "#fff" : C.muted,
+                  }}>{p}</div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <ViewModal row={viewRow} onClose={() => setViewRow(null)} />
+
+      {toast && (
+        <div style={{
+          position: "fixed", bottom: 24, right: 24, zIndex: 300,
+          background: C.toastBg, borderLeft: `4px solid ${C.toastBar}`,
+          borderRadius: 4, padding: "14px 16px", minWidth: 320, maxWidth: "90vw",
+          boxShadow: "0 6px 18px rgba(0,0,0,.14)",
+          animation: "bacstoast .18s ease-out",
+          display: "flex", alignItems: "center", gap: 12,
+        }}>
+          <span style={{
+            width: 20, height: 20, borderRadius: "50%", background: C.toastBar, color: C.toastBg,
+            fontSize: 11, fontWeight: 700, display: "inline-flex", alignItems: "center",
+            justifyContent: "center", flexShrink: 0,
+          }}>✓</span>
+          <span style={{ fontSize: 14, color: C.toastText, flex: 1 }}>{toast}</span>
+          <button
+            onClick={() => setToast(null)}
+            aria-label="Dismiss"
+            style={{
+              background: "none", border: "none", cursor: "pointer", color: "#5C6470",
+              fontSize: 17, lineHeight: 1, padding: 2, flexShrink: 0,
+            }}
+          >×</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<BacsImportTab />);
+</script>
+</body>
+</html>
